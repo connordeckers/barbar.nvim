@@ -1,189 +1,140 @@
-local command = vim.api.nvim_command
-local create_user_command = vim.api.nvim_create_user_command
-local get_current_buf = vim.api.nvim_get_current_buf
-
---- @type bufferline.api
-local api = require'bufferline.api'
-
---- @type bbye
-local bbye = require'bufferline.bbye'
-
 --- @type bufferline.highlight
-local highlight = require'bufferline.highlight'
+local highlight = require("bufferline.highlight")
 
 --- @type bufferline.JumpMode
-local JumpMode = require'bufferline.jump_mode'
+local JumpMode = require("bufferline.jump_mode")
 
 --- @type bufferline.options
-local options = require'bufferline.options'
+local options = require("bufferline.options")
 
 --- @type bufferline.render
-local render = require'bufferline.render'
+local render = require("bufferline.render")
 
---- @type bufferline.state
-local state = require'bufferline.state'
+--- @type bufferline.commands
+local commands = require("bufferline.commands")
+
+local defaultConfig = {
+	-- Automatically create commands
+	create_commands = true,
+
+	-- Enable/disable animations
+	animation = true,
+
+	-- Enable/disable auto-hiding the tab bar when there is a single buffer
+	auto_hide = false,
+
+	-- Enable/disable current/total tabpages indicator (top right corner)
+	tabpages = true,
+
+	-- Enable/disable close button
+	closable = true,
+
+	-- Enables/disable clickable tabs
+	--  - left-click: go to buffer
+	--  - middle-click: delete buffer
+	clickable = true,
+
+	-- Enables / disables diagnostic symbols
+	diagnostics = {
+		-- OR `vim.diagnostic.severity`
+		[vim.diagnostic.severity.ERROR] = { enabled = true, icon = "ﬀ" },
+		[vim.diagnostic.severity.WARN] = { enabled = false },
+		[vim.diagnostic.severity.INFO] = { enabled = false },
+		[vim.diagnostic.severity.HINT] = { enabled = false },
+	},
+
+	-- Excludes buffers from the tabline
+	exclude_ft = {},
+	exclude_name = {},
+
+	-- Hide inactive buffers and file extensions. Other options are `current` and `visible`
+	hide = { extensions = true, inactive = false },
+
+	-- Enable/disable icons
+	-- if set to 'numbers', will show buffer index in the tabline
+	-- if set to 'both', will show buffer index and icons in the tabline
+	icons = true,
+
+	-- If set, the icon color will follow its corresponding buffer
+	-- highlight group. By default, the Buffer*Icon group is linked to the
+	-- Buffer* group (see Highlighting below). Otherwise, it will take its
+	-- default value as defined by devicons.
+	icon_custom_colors = false,
+
+	-- Configure icons on the bufferline.
+	icon_separator_active = "▎",
+	icon_separator_inactive = "▎",
+	icon_close_tab = "",
+	icon_close_tab_modified = "●",
+	icon_pinned = "車",
+
+	-- If true, new buffers will be inserted at the start/end of the list.
+	-- Default is to insert after current buffer.
+	insert_at_end = false,
+	insert_at_start = false,
+
+	-- Sets the maximum padding width with which to surround each tab
+	maximum_padding = 1,
+
+	-- Sets the minimum padding width with which to surround each tab
+	minimum_padding = 1,
+
+	-- Sets the maximum buffer name length.
+	maximum_length = 30,
+
+	-- If set, the letters for each buffer in buffer-pick mode will be
+	-- assigned based on their name. Otherwise or in case all letters are
+	-- already assigned, the behavior is to assign letters in order of
+	-- usability (see order below)
+	semantic_letters = true,
+
+	-- New buffer letters are assigned in this order. This order is
+	-- optimal for the qwerty keyboard layout but might need adjustement
+	-- for other layouts.
+	letters = "asdfjkl;ghnmxcvbziowerutyqpASDFJKLGHNMXCVBZIOWERUTYQP",
+
+	-- Sets the name of unnamed buffers. By default format is "[Buffer X]"
+	-- where X is the buffer number. But only a static string is accepted here.
+	no_name_title = nil,
+}
 
 -------------------------------
 -- Section: `bufferline` module
 -------------------------------
 
 --- @class bufferline
-local bufferline = {}
+local bufferline = {
+	create_commands = function()
+		local create_user_command = vim.api.nvim_create_user_command
+
+		-- Create all necessary commands
+		create_user_command("BarbarEnable", render.enable, { desc = "Enable barbar.nvim" })
+		create_user_command("BarbarDisable", render.disable, { desc = "Disable barbar.nvim" })
+
+		for key, params in pairs(commands) do
+			create_user_command("Buffer" .. key, params.action, params.args)
+		end
+	end,
+}
 
 --- Setup this plugin.
 --- @param user_config? table
 function bufferline.setup(user_config)
-  -- Show the tabline
-  vim.opt.showtabline = 2
+	user_config = vim.tbl_deep_extend("force", defaultConfig, user_config)
 
-  -- Create all necessary commands
-  create_user_command('BarbarEnable', render.enable, {desc = 'Enable barbar.nvim'})
-  create_user_command('BarbarDisable', render.disable, {desc = 'Disable barbar.nvim'})
+	-- Show the tabline
+	vim.opt.showtabline = 2
 
-  create_user_command(
-    'BufferNext',
-    function(tbl) api.goto_buffer_relative(math.max(1, tbl.count)) end,
-    {count = true, desc = 'Go to the next buffer'}
-  )
+	if user_config.create_commands then
+		bufferline.create_commands()
+	end
 
-  create_user_command(
-    'BufferPrevious',
-    function(tbl) api.goto_buffer_relative(-math.max(1, tbl.count)) end,
-    {count = true, desc = 'Go to the previous buffer'}
-  )
+	-- Set the options and watchers for when they are edited
+	vim.g.bufferline = user_config or vim.empty_dict()
 
-  create_user_command(
-    'BufferGoto',
-    function(tbl) api.goto_buffer(tonumber(tbl.args) or 1) end,
-    {desc = 'Go to the buffer at the specified index', nargs = 1}
-  )
-
-  create_user_command('BufferFirst', 'BufferGoto 1', {desc = 'Go to the first buffer'})
-  create_user_command('BufferLast', 'BufferGoto -1', {desc = 'Go to the last buffer'})
-
-  create_user_command(
-    'BufferMove',
-    function(tbl) command('BufferMovePrevious ' .. tbl.count) end,
-    {count = true, desc = 'Synonym for `:BufferMovePrevious`'}
-  )
-
-  create_user_command(
-    'BufferMoveNext',
-    function(tbl) api.move_current_buffer(math.max(1, tbl.count)) end,
-    {count = true, desc = 'Move the current buffer to the right'}
-  )
-
-  create_user_command(
-    'BufferMovePrevious',
-    function(tbl) api.move_current_buffer(-math.max(1, tbl.count)) end,
-    {count = true, desc = 'Move the current buffer to the left'}
-  )
-
-  create_user_command(
-    'BufferMoveStart',
-    function(tbl) api.move_current_buffer_to(1) end,
-    {desc = 'Move current buffer to the front'}
-  )
-
-  create_user_command('BufferPick', api.pick_buffer, {desc = 'Pick a buffer'})
-
-  create_user_command('BufferPin', function() api.toggle_pin() end, {desc = 'Un/pin a buffer'})
-
-  create_user_command(
-    'BufferOrderByBufferNumber',
-    api.order_by_buffer_number,
-    {desc = 'Order the bufferline by buffer number'}
-  )
-
-  create_user_command(
-    'BufferOrderByDirectory',
-    api.order_by_directory,
-    {desc = 'Order the bufferline by directory'}
-  )
-
-  create_user_command('BufferOrderByLanguage', api.order_by_language, {desc = 'Order the bufferline by language'})
-
-  create_user_command(
-    'BufferOrderByWindowNumber',
-    api.order_by_window_number,
-    {desc = 'Order the bufferline by window number'}
-  )
-
-  create_user_command(
-    'BufferClose',
-    function(tbl)
-      local focus_buffer = state.find_next_buffer(get_current_buf())
-      bbye.bdelete(tbl.bang, tbl.args, tbl.smods or tbl.mods, focus_buffer)
-    end,
-    {bang = true, complete = 'buffer', desc = 'Close the current buffer.', nargs = '?'}
-  )
-
-  create_user_command(
-    'BufferDelete',
-    function(tbl) bbye.bdelete(tbl.bang, tbl.args, tbl.smods or tbl.mods) end,
-    {bang = true, complete = 'buffer', desc = 'Synonym for `:BufferClose`', nargs = '?'}
-  )
-
-  create_user_command(
-    'BufferWipeout',
-    function(tbl) bbye.bwipeout(tbl.bang, tbl.args, tbl.smods or tbl.mods) end,
-    {bang = true, complete = 'buffer', desc = 'Wipe out the buffer', nargs = '?'}
-  )
-
-  create_user_command(
-    'BufferCloseAllButCurrent',
-    api.close_all_but_current,
-    {desc = 'Close every buffer except the current one'}
-  )
-
-  create_user_command(
-    'BufferCloseAllButVisible',
-    api.close_all_but_visible,
-    {desc = 'Close every buffer except those in visible windows'}
-  )
-
-  create_user_command(
-    'BufferCloseAllButPinned',
-    api.close_all_but_pinned,
-    {desc = 'Close every buffer except pinned buffers'}
-  )
-
-  create_user_command(
-    'BufferCloseAllButCurrentOrPinned',
-    api.close_all_but_current_or_pinned,
-    {desc = 'Close every buffer except pinned buffers or the current buffer'}
-  )
-
-  create_user_command(
-    'BufferCloseBuffersLeft',
-    api.close_buffers_left,
-    {desc = 'Close all buffers to the left of the current buffer'}
-  )
-
-  create_user_command(
-    'BufferCloseBuffersRight',
-    api.close_buffers_right,
-    {desc = 'Close all buffers to the right of the current buffer'}
-  )
-
-  create_user_command(
-    'BufferScrollLeft',
-    function(tbl) render.scroll(-math.max(1, tbl.count)) end,
-    {count = true, desc = 'Scroll the bufferline left'}
-  )
-
-  create_user_command(
-    'BufferScrollRight',
-    function(tbl) render.scroll(math.max(1, tbl.count)) end,
-    {count = true, desc = 'Scroll the bufferline right'}
-  )
-
-  -- Set the options and watchers for when they are edited
-  vim.g.bufferline = user_config or vim.empty_dict()
-
-  highlight.setup()
-  JumpMode.set_letters(options.letters())
-  render.enable()
+	highlight.setup()
+	JumpMode.set_letters(options.letters())
+	render.enable()
 end
 
 return bufferline
